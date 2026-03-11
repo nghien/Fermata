@@ -141,14 +141,29 @@ public class YoutubeWebView extends FermataWebView {
 	private void prevNext(boolean next) {
 		FermataChromeClient chrome = getWebChromeClient();
 		if (chrome == null) return;
-		chrome.exitFullScreen().thenRun(() -> evaluateJavascript("""
-				function prevNextVideo() {
+
+		Runnable clickNextPrev = () -> evaluateJavascript("""
+				function prevNextVideo(attempt) {
 				  const buttons = document.querySelectorAll('button.player-middle-controls-prev-next-button');
-				  console.log('Prev/Next buttons:', buttons);
-				  if (buttons) buttons[%d].click();
+				  const button = buttons && buttons.length > %d ? buttons[%d] : null;
+				  console.log('Prev/Next buttons:', buttons, 'attempt=', attempt);
+				
+				  if (button) {
+				    button.click();
+				    return;
+				  }
+				
+				  if (attempt < 10) setTimeout(() => prevNextVideo(attempt + 1), 250);
 				}
-				setTimeout(prevNextVideo, 600);
-				""".formatted(next ? 1 : 0), null));
+				
+				setTimeout(() => prevNextVideo(0), 250);
+				""".formatted(next ? 1 : 0, next ? 1 : 0), null);
+
+		if (chrome.isFullScreen() && isAttachedToWindow()) {
+			chrome.exitFullScreen().thenRun(clickNextPrev);
+		} else {
+			clickNextPrev.run();
+		}
 	}
 
 	FutureSupplier<Long> getDuration() {
