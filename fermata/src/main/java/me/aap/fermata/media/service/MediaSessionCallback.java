@@ -636,10 +636,22 @@ public class MediaSessionCallback extends MediaSessionCompat.Callback
 	private FutureSupplier<Void> skipTo(boolean next) {
 		PlayableItem i;
 		MediaEngine eng = getEngine();
-		if ((eng == null) || ((i = eng.getSource()) == null)) return completedVoid();
+		if ((eng == null) || ((i = eng.getSource()) == null)) {
+			Log.w("Skip ignored: engine/source is null. next=", next,
+					", engine=", eng);
+			return completedVoid();
+		}
+
+		Log.i("Skip requested. next=", next, ", current=", i,
+				", state=", getPlaybackState().getState());
 
 		return (next ? getNextPlayable(i) : getPrevPlayable(i)).then(this::prepareItem).then(pi -> {
-			if (pi != null) skipTo(next, pi);
+			if (pi != null) {
+				Log.i("Skip target prepared. next=", next, ", target=", pi);
+				skipTo(next, pi);
+			} else {
+				Log.w("Skip target is null. next=", next, ", current=", i);
+			}
 			return completedVoid();
 		});
 	}
@@ -647,9 +659,17 @@ public class MediaSessionCallback extends MediaSessionCompat.Callback
 	private void skipTo(boolean next, PlayableItem i) {
 		PlaybackStateCompat state = getPlaybackState();
 		long pos = i.getPrefs().getPositionPref();
+		long qid = i.getQueueId().peek(QueueItem.UNKNOWN_ID);
 		PlaybackStateCompat.Builder b = new PlaybackStateCompat.Builder(state);
+		b.setActiveQueueItemId(qid);
 		b.setState(next ? STATE_SKIPPING_TO_NEXT : STATE_SKIPPING_TO_PREVIOUS, pos,
 				state.getPlaybackSpeed());
+		MediaMetadataCompat.Builder md = new MediaMetadataCompat.Builder();
+		String title = i.getResource().getName();
+		md.putString(METADATA_KEY_DISPLAY_TITLE, title);
+		Log.i("Publishing skip state. next=", next, ", target=", i, ", queueId=", qid,
+				", pos=", pos, ", speed=", state.getPlaybackSpeed(), ", title=", title);
+		session.setMetadata(md.build());
 		setPlaybackState(b.build());
 		playPreparedItem(i, pos);
 	}
