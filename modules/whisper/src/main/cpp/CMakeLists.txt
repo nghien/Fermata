@@ -26,15 +26,35 @@ set(GGML_STATIC ${IS_RELEASE} CACHE BOOL "" FORCE)
 set(GGML_LTO ${IS_RELEASE} CACHE BOOL "" FORCE)
 
 if (CMAKE_ANDROID_ARCH_ABI MATCHES "arm64")
-    set(GGML_VULKAN ON CACHE BOOL "Enable Vulkan" FORCE)
-    FetchContent_Declare(vk_hpp GIT_REPOSITORY https://github.com/KhronosGroup/Vulkan-Hpp
-            GIT_TAG v1.3.275
-    )
-    FetchContent_MakeAvailable(vk_hpp)
-    include_directories(${vk_hpp_SOURCE_DIR})
-    set(Vulkan_INCLUDE_DIR "${ANDROID_NDK}/toolchains/llvm/prebuilt/linux-x86_64/sysroot/usr/include")
-    set(Vulkan_GLSLC_EXECUTABLE "${ANDROID_NDK}/shader-tools/linux-x86_64/glslc")
-    find_library(Vulkan_LIBRARY vulkan)
+    # NOTE:
+    # On Windows host builds, ggml's `vulkan-shaders-gen` host build can fail because
+    # the nested CMake invocation does not reliably resolve Ninja from PATH.
+    # Keep Vulkan enabled for non-Windows hosts and fall back to CPU on Windows.
+    if (CMAKE_HOST_WIN32)
+        set(GGML_VULKAN OFF CACHE BOOL "Disable Vulkan on Windows host builds" FORCE)
+    else ()
+        set(GGML_VULKAN ON CACHE BOOL "Enable Vulkan" FORCE)
+    endif ()
+
+    if (GGML_VULKAN)
+        FetchContent_Declare(vk_hpp GIT_REPOSITORY https://github.com/KhronosGroup/Vulkan-Hpp
+                GIT_TAG v1.3.275
+        )
+        FetchContent_MakeAvailable(vk_hpp)
+        include_directories(${vk_hpp_SOURCE_DIR})
+
+        if (CMAKE_HOST_WIN32)
+            set(ANDROID_NDK_HOST_TAG "windows-x86_64")
+        elseif (CMAKE_HOST_APPLE)
+            set(ANDROID_NDK_HOST_TAG "darwin-x86_64")
+        else ()
+            set(ANDROID_NDK_HOST_TAG "linux-x86_64")
+        endif ()
+
+        set(Vulkan_INCLUDE_DIR "${ANDROID_NDK}/toolchains/llvm/prebuilt/${ANDROID_NDK_HOST_TAG}/sysroot/usr/include")
+        set(Vulkan_GLSLC_EXECUTABLE "${ANDROID_NDK}/shader-tools/${ANDROID_NDK_HOST_TAG}/glslc")
+        find_library(Vulkan_LIBRARY vulkan)
+    endif ()
 endif ()
 
 find_library(LOG_LIB log)
@@ -52,7 +72,9 @@ target_include_directories(whisper_jni PRIVATE ${whispercpp_SOURCE_DIR})
 
 if (CMAKE_ANDROID_ARCH_ABI MATCHES "arm64")
     target_compile_options(whisper_jni PRIVATE -march=armv8.2-a+fp16+simd+dotprod)
-    target_link_libraries(whisper_jni PRIVATE ${VULKAN_LIB})
+    if (GGML_VULKAN)
+        target_link_libraries(whisper_jni PRIVATE ${Vulkan_LIBRARY})
+    endif ()
 elseif (CMAKE_ANDROID_ARCH_ABI MATCHES "x86")
     set(GGML_NATIVE ON CACHE BOOL "" FORCE)
 endif ()
